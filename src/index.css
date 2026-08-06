@@ -1,0 +1,168 @@
+@import "tailwindcss";
+
+@keyframes cameraDrift {
+  0% {
+    transform: scale(1.02) translate(0px, 0px);
+  }
+  25% {
+    transform: scale(1.05) translate(-6px, -4px);
+  }
+  50% {
+    transform: scale(1.03) translate(4px, -8px);
+  }
+  75% {
+    transform: scale(1.06) translate(6px, 2px);
+  }
+  100% {
+    transform: scale(1.02) translate(0px, 0px);
+  }
+}
+
+@keyframes fogSlide1 {
+  0% {
+    transform: translateX(-10%);
+    opacity: 0.25;
+  }
+  50% {
+    transform: translateX(10%);
+    opacity: 0.45;
+  }
+  100% {
+    transform: translateX(-10%);
+    opacity: 0.25;
+  }
+}
+
+@keyframes fogSlide2 {
+  0% {
+    transform: translateX(10%) translateY(-5%);
+    opacity: 0.3;
+  }
+  50% {
+    transform: translateX(-10%) translateY(5%);
+    opacity: 0.15;
+  }
+  100% {
+    transform: translateX(10%) translateY(-5%);
+    opacity: 0.3;
+  }
+}
+
+@keyframes godRayPulse {
+  0%, 100% {
+    opacity: 0.25;
+    transform: skewX(-5deg) scaleY(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: skewX(-8deg) scaleY(1.05);
+  }
+}
+
+@keyframes torchFlicker {
+  0%, 100% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  25% {
+    opacity: 0.95;
+    transform: scale(1.08);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(0.95);
+  }
+  75% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+@keyframes particleFloat {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.8;
+  }
+  80% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(-80px) translateX(20px);
+    opacity: 0;
+  }
+}
+
+@keyframes emberRise {
+  0% {
+    transform: translateY(0) translateX(0) scale(1);
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(-120px) translateX(-15px) scale(0.2);
+    opacity: 0;
+  }
+}
+
+.animate-camera-drift {
+  animation: cameraDrift 28s ease-in-out infinite;
+}
+
+.animate-fog-1 {
+  animation: fogSlide1 22s ease-in-out infinite;
+}
+
+.animate-fog-2 {
+  animation: fogSlide2 30s ease-in-out infinite;
+}
+
+.animate-god-ray {
+  animation: godRayPulse 8s ease-in-out infinite;
+}
+
+.animate-torch-flicker {
+  animation: torchFlicker 3s ease-in-out infinite;
+}
+
+.animate-particle-1 {
+  animation: particleFloat 6s ease-out infinite;
+}
+
+.animate-particle-2 {
+  animation: particleFloat 9s ease-out infinite 2s;
+}
+
+.animate-particle-3 {
+  animation: particleFloat 7.5s ease-out infinite 4s;
+}
+
+.animate-ember-1 {
+  animation: emberRise 4s ease-out infinite;
+}
+
+.animate-ember-2 {
+  animation: emberRise 5.5s ease-out infinite 1.5s;
+}
+
+.animate-ember-3 {
+  animation: emberRise 4.8s ease-out infinite 3s;
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #0c0c08;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #3d2b1f;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #b8860b;
+}

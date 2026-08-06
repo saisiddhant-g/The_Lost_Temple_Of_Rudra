@@ -1,0 +1,6 @@
+{
+  "name": "The Lost Temple of Rudra",
+  "description": "An AI-driven narrative exploration game set in an ancient Indian temple, featuring persistent world model evaluation and cinematic presentation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
