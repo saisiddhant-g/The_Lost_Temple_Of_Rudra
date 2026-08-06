@@ -1,122 +1,82 @@
 /**
  * actionEngine.ts
- * Generates the list of available ActionButtons dynamically based on GameState.
- * No static button lists — every room's actions are computed at render time.
+ * Generates dynamic ActionButton[] from GameState.
+ * Actions evolve as puzzle steps complete and items are collected.
  */
 import { ActionButton, GameState, RoomId } from '../types';
+import { ROOM_PUZZLE_MAP } from './puzzleRegistry';
 
-const MORE_BTN: ActionButton = {
-  id: 'more',
-  label: 'MORE',
-  iconName: 'MoreHorizontal',
-  command: 'more options',
-};
+// ── Shared buttons ────────────────────────────────────────────────────────────
+const MORE_BTN: ActionButton = { id: 'more', label: 'MORE', iconName: 'MoreHorizontal', command: 'more options' };
 
-const NAV_FORWARD: ActionButton = {
-  id: 'move_forward',
-  label: 'MOVE FORWARD',
-  iconName: 'Footprints',
-  command: 'move forward',
-};
-
-function hasItem(state: GameState, itemId: string): boolean {
-  return state.inventory.some((i) => i.id === itemId);
+function nav(label: string, command: string): ActionButton {
+  return { id: 'move_forward', label, iconName: 'Footprints', command };
 }
 
-function actionDone(state: GameState, actionId: string): boolean {
-  return state.completedActions.includes(actionId);
+// ── State queries ─────────────────────────────────────────────────────────────
+function hasItem(state: GameState, id: string): boolean {
+  return state.inventory.some((i) => i.id === id);
 }
 
-function roomSolved(state: GameState, roomId: RoomId): boolean {
+function stepDone(state: GameState, roomId: RoomId, stepId: string): boolean {
+  const puzzleId = ROOM_PUZZLE_MAP[roomId];
+  if (!puzzleId) return false;
+  return state.puzzleProgress[puzzleId]?.stepsCompleted.includes(stepId) ?? false;
+}
+
+function puzzleSolved(state: GameState, roomId: RoomId): boolean {
   return state.roomFlags[roomId]?.puzzleSolved ?? false;
 }
 
-// ── Per-room action generators ─────────────────────────────────────────────────
-
+// ── ENTRANCE ──────────────────────────────────────────────────────────────────
 function entranceActions(state: GameState): ActionButton[] {
+  const solved = puzzleSolved(state, 'entrance');
+  const readDone = stepDone(state, 'entrance', 'entrance_s1');
+  const hiddenDone = stepDone(state, 'entrance', 'entrance_s2');
   const actions: ActionButton[] = [];
-  const solved = roomSolved(state, 'entrance');
 
-  actions.push({
-    id: 'look_around',
-    label: 'LOOK AROUND',
-    iconName: 'Eye',
-    command: 'look around',
-  });
+  actions.push({ id: 'look_around', label: 'LOOK AROUND', iconName: 'Eye', command: 'look around' });
+  actions.push({ id: 'inspect_doors', label: 'INSPECT DOORS', iconName: 'Search', command: 'inspect doors' });
 
-  if (!actionDone(state, 'entrance_read_inscription')) {
-    actions.push({
-      id: 'read_inscription',
-      label: 'READ INSCRIPTION',
-      iconName: 'FileText',
-      command: 'read inscription',
-      primary: !solved,
-    });
-  } else {
-    actions.push({
-      id: 'inspect_symbols',
-      label: 'INSPECT SYMBOLS',
-      iconName: 'Search',
-      command: 'inspect symbols',
-    });
+  if (!readDone) {
+    actions.push({ id: 'read_inscription', label: 'READ INSCRIPTION', iconName: 'FileText', command: 'read inscription', primary: true });
+  } else if (!hiddenDone) {
+    actions.push({ id: 'inspect_symbols', label: 'REVEAL HIDDEN SYMBOLS', iconName: 'Search', command: 'inspect symbols', primary: true });
+  } else if (!solved) {
+    actions.push({ id: 'light_brazier', label: 'LIGHT BRAZIER', iconName: 'Flame', command: 'light brazier', primary: true });
   }
 
-  actions.push({
-    id: 'inspect_doors',
-    label: 'INSPECT DOORS',
-    iconName: 'Search',
-    command: 'inspect doors',
-  });
-
-  if (!solved) {
-    actions.push({
-      id: 'light_brazier',
-      label: 'LIGHT BRAZIER',
-      iconName: 'Flame',
-      command: 'light brazier',
-      primary: actionDone(state, 'entrance_read_inscription'),
-    });
-  } else {
-    actions.push({
-      id: 'push_doors',
-      label: 'PUSH OPEN DOORS',
-      iconName: 'DoorOpen',
-      command: 'push doors',
-      primary: true,
-    });
+  if (solved) {
+    actions.push({ id: 'translate_glyphs', label: 'TRANSLATE GLYPHS', iconName: 'FileText', command: 'examine hidden symbol rubbing' });
+    actions.push(nav('ENTER TEMPLE', 'move forward'));
   }
 
-  if (state.unlockedRooms.guardians) {
-    actions.push({ ...NAV_FORWARD, label: 'ENTER TEMPLE', command: 'move forward' });
-  }
-
-  actions.push({
-    id: 'ask_guide',
-    label: 'ASK GUIDE',
-    iconName: 'Compass',
-    command: 'ask explorer guide',
-  });
+  actions.push({ id: 'ask_guide', label: 'ASK GUIDE', iconName: 'Compass', command: 'ask explorer guide' });
   actions.push(MORE_BTN);
   return actions;
 }
 
+// ── GUARDIANS ─────────────────────────────────────────────────────────────────
 function guardiansActions(state: GameState): ActionButton[] {
+  const solved = puzzleSolved(state, 'guardians');
+  const floorDone = stepDone(state, 'guardians', 'guardians_s1');
+  const carvingsDone = stepDone(state, 'guardians', 'guardians_s2');
   const actions: ActionButton[] = [];
-  const solved = roomSolved(state, 'guardians');
 
   actions.push({ id: 'look_around', label: 'LOOK AROUND', iconName: 'Eye', command: 'look around' });
   actions.push({ id: 'inspect_statues', label: 'INSPECT STATUES', iconName: 'Search', command: 'inspect statues' });
 
-  if (!actionDone(state, 'guardians_read_carvings')) {
+  if (!floorDone) {
+    actions.push({ id: 'study_floor', label: 'STUDY FLOOR MARKINGS', iconName: 'Grid', command: 'look around', primary: true });
+  }
+  if (floorDone && !carvingsDone) {
     actions.push({ id: 'read_carvings', label: 'READ CARVINGS', iconName: 'FileText', command: 'read carvings', primary: true });
   }
-
-  if (!solved) {
-    actions.push({ id: 'rotate_statue', label: 'ROTATE STATUE', iconName: 'RotateCw', command: 'rotate statue', primary: actionDone(state, 'guardians_read_carvings') });
+  if (carvingsDone && !solved) {
+    actions.push({ id: 'rotate_statue', label: 'ROTATE SENTINELS', iconName: 'RotateCw', command: 'rotate statue', primary: true });
   }
-
-  if (state.unlockedRooms.echoes) {
-    actions.push({ ...NAV_FORWARD, label: 'MOVE NORTH', command: 'move north' });
+  if (solved) {
+    actions.push(nav('MOVE NORTH', 'move north'));
   }
 
   actions.push({ id: 'ask_temple', label: 'ASK TEMPLE', iconName: 'Flame', command: 'ask temple' });
@@ -124,25 +84,28 @@ function guardiansActions(state: GameState): ActionButton[] {
   return actions;
 }
 
+// ── ECHOES ────────────────────────────────────────────────────────────────────
 function echoesActions(state: GameState): ActionButton[] {
+  const solved = puzzleSolved(state, 'echoes');
+  const listenDone = stepDone(state, 'echoes', 'echoes_s1');
+  const crystalsDone = stepDone(state, 'echoes', 'echoes_s2');
   const actions: ActionButton[] = [];
-  const solved = roomSolved(state, 'echoes');
 
   actions.push({ id: 'inspect_mechanism', label: 'INSPECT MECHANISM', iconName: 'Search', command: 'inspect mechanism' });
   actions.push({ id: 'look_around', label: 'LOOK AROUND', iconName: 'Eye', command: 'look around' });
 
-  if (!actionDone(state, 'echoes_listened')) {
-    actions.push({ id: 'listen', label: 'LISTEN', iconName: 'Volume2', command: 'listen carefully', primary: true });
+  if (!listenDone) {
+    actions.push({ id: 'listen', label: 'LISTEN CAREFULLY', iconName: 'Volume2', command: 'listen carefully', primary: true });
   }
-
-  actions.push({ id: 'read_niches', label: 'READ NICHES', iconName: 'FileText', command: 'read niches' });
-
-  if (!solved) {
-    actions.push({ id: 'touch_orb', label: 'TOUCH ORB', iconName: 'Hand', command: 'touch orb', primary: actionDone(state, 'echoes_listened') });
+  if (listenDone && !crystalsDone) {
+    actions.push({ id: 'activate_crystals', label: 'ACTIVATE CRYSTALS', iconName: 'Zap', command: 'activate crystal', primary: true });
+    actions.push({ id: 'read_niches', label: 'READ NICHES', iconName: 'FileText', command: 'read niches' });
   }
-
-  if (state.unlockedRooms.puzzle) {
-    actions.push({ ...NAV_FORWARD, label: 'MOVE EAST', command: 'move east' });
+  if (crystalsDone && !solved) {
+    actions.push({ id: 'touch_orb', label: 'ATTUNE ORB', iconName: 'Hand', command: 'touch orb', primary: true });
+  }
+  if (solved) {
+    actions.push(nav('MOVE EAST', 'move east'));
   }
 
   actions.push({ id: 'ask_guide', label: 'ASK GUIDE', iconName: 'Compass', command: 'ask explorer guide' });
@@ -150,21 +113,29 @@ function echoesActions(state: GameState): ActionButton[] {
   return actions;
 }
 
+// ── PUZZLE CHAMBER ────────────────────────────────────────────────────────────
 function puzzleActions(state: GameState): ActionButton[] {
+  const solved = puzzleSolved(state, 'puzzle');
+  const inspectedDone = stepDone(state, 'puzzle', 'puzzle_s1');
+  const decodedDone = stepDone(state, 'puzzle', 'puzzle_s2');
   const actions: ActionButton[] = [];
-  const solved = roomSolved(state, 'puzzle');
 
-  actions.push({ id: 'inspect_plates', label: 'INSPECT PLATES', iconName: 'Search', command: 'inspect plates' });
-  actions.push({ id: 'look_around', label: 'LOOK AROUND', iconName: 'Eye', command: 'look around' });
-  actions.push({ id: 'read_symbols', label: 'READ SYMBOLS', iconName: 'FileText', command: 'read symbols' });
-
-  if (!solved) {
-    actions.push({ id: 'rotate_plate', label: 'ROTATE PLATE', iconName: 'RotateCw', command: 'rotate plate', primary: actionDone(state, 'puzzle_read_symbols') });
-    actions.push({ id: 'reset_puzzle', label: 'RESET PUZZLE', iconName: 'RefreshCw', command: 'reset puzzle' });
+  if (!inspectedDone) {
+    actions.push({ id: 'inspect_plates', label: 'INSPECT PLATES', iconName: 'Search', command: 'inspect plates', primary: true });
+  } else {
+    actions.push({ id: 'look_around', label: 'LOOK AROUND', iconName: 'Eye', command: 'look around' });
   }
 
-  if (state.unlockedRooms.library) {
-    actions.push({ ...NAV_FORWARD, label: 'DESCEND STEPS', command: 'move down' });
+  if (inspectedDone && !decodedDone) {
+    actions.push({ id: 'read_symbols', label: 'DECODE SYMBOLS', iconName: 'FileText', command: 'read symbols', primary: true });
+  }
+  if (decodedDone && !solved) {
+    actions.push({ id: 'rotate_plate', label: 'ROTATE PLATES', iconName: 'RotateCw', command: 'rotate plate', primary: true });
+    actions.push({ id: 'reset_puzzle', label: 'RESET PLATES', iconName: 'RefreshCw', command: 'reset puzzle' });
+  }
+  if (solved) {
+    actions.push({ id: 'examine_rubbing', label: 'EXAMINE RUBBING', iconName: 'FileText', command: 'examine glyph rubbing' });
+    actions.push(nav('DESCEND STEPS', 'move down'));
   }
 
   actions.push({ id: 'ask_temple', label: 'ASK TEMPLE', iconName: 'Flame', command: 'ask temple' });
@@ -172,22 +143,35 @@ function puzzleActions(state: GameState): ActionButton[] {
   return actions;
 }
 
+// ── LIBRARY ───────────────────────────────────────────────────────────────────
 function libraryActions(state: GameState): ActionButton[] {
+  const solved = puzzleSolved(state, 'library');
+  const surveyDone = stepDone(state, 'library', 'library_s1');
+  const fragmentFound = hasItem(state, 'missing_tablet_fragment');
+  const tabletHeld = hasItem(state, 'drainage_tablet');
   const actions: ActionButton[] = [];
-  const tabletCollected = hasItem(state, 'drainage_tablet');
 
-  actions.push({ id: 'inspect_tablets', label: 'INSPECT TABLETS', iconName: 'Search', command: 'inspect tablets' });
-  actions.push({ id: 'look_around', label: 'LOOK AROUND', iconName: 'Eye', command: 'look around' });
-  actions.push({ id: 'read_scroll', label: 'READ SCROLL', iconName: 'BookOpen', command: 'read scroll' });
-
-  if (!tabletCollected) {
-    actions.push({ id: 'take_tablet', label: 'TAKE TABLET', iconName: 'Hand', command: 'take tablet', primary: true });
+  if (!surveyDone) {
+    actions.push({ id: 'survey_stacks', label: 'SURVEY STACKS', iconName: 'Search', command: 'survey stacks', primary: true });
   } else {
-    actions.push({ id: 'examine_tablet', label: 'EXAMINE TABLET', iconName: 'FileText', command: 'examine drainage tablet', primary: false });
+    actions.push({ id: 'inspect_tablets', label: 'INSPECT TABLETS', iconName: 'Search', command: 'inspect tablets' });
   }
+  actions.push({ id: 'look_around', label: 'LOOK AROUND', iconName: 'Eye', command: 'look around' });
 
-  if (state.unlockedRooms.flooded) {
-    actions.push({ ...NAV_FORWARD, label: 'MOVE DOWN', command: 'move down' });
+  if (surveyDone && !fragmentFound && !tabletHeld) {
+    actions.push({ id: 'search_fragment', label: 'SEARCH FOR FRAGMENT', iconName: 'Search', command: 'search fragment', primary: true });
+  }
+  if (fragmentFound && !tabletHeld) {
+    actions.push({ id: 'read_scroll', label: 'READ COMBINED DIAGRAM', iconName: 'BookOpen', command: 'read scroll', primary: true });
+  }
+  if (stepDone(state, 'library', 'library_s3') && !tabletHeld) {
+    actions.push({ id: 'take_tablet', label: 'TAKE DRAINAGE TABLET', iconName: 'Hand', command: 'take tablet', primary: true });
+  }
+  if (tabletHeld) {
+    actions.push({ id: 'examine_tablet', label: 'EXAMINE TABLET', iconName: 'FileText', command: 'examine drainage tablet' });
+  }
+  if (solved) {
+    actions.push(nav('MOVE DOWN', 'move down'));
   }
 
   actions.push({ id: 'ask_guide', label: 'ASK GUIDE', iconName: 'Compass', command: 'ask explorer guide' });
@@ -195,29 +179,40 @@ function libraryActions(state: GameState): ActionButton[] {
   return actions;
 }
 
+// ── FLOODED ───────────────────────────────────────────────────────────────────
 function floodedActions(state: GameState): ActionButton[] {
+  const solved = puzzleSolved(state, 'flooded');
+  const probedDone = stepDone(state, 'flooded', 'flooded_s1');
+  const relicFound = hasItem(state, 'submerged_relic');
+  const hasFish = hasItem(state, 'bronze_fish');
+  const hasTablet = hasItem(state, 'drainage_tablet');
   const actions: ActionButton[] = [];
-  const solved = roomSolved(state, 'flooded');
+
+  if (!probedDone) {
+    actions.push({ id: 'probe_water', label: 'PROBE WATER', iconName: 'Droplets', command: 'probe water', primary: true });
+  } else {
+    actions.push({ id: 'probe_water', label: 'PROBE WATER', iconName: 'Droplets', command: 'probe water' });
+  }
+
+  if (probedDone && !relicFound) {
+    actions.push({ id: 'recover_relic', label: 'RECOVER RELIC', iconName: 'Hand', command: 'recover relic', primary: true });
+  }
 
   actions.push({ id: 'inspect_sluices', label: 'INSPECT SLUICES', iconName: 'Search', command: 'inspect sluices' });
-  actions.push({ id: 'probe_water', label: 'PROBE WATER', iconName: 'Droplets', command: 'probe water' });
   actions.push({ id: 'read_markings', label: 'READ MARKINGS', iconName: 'FileText', command: 'read markings' });
 
   if (!solved) {
-    const hasFish = hasItem(state, 'bronze_fish');
-    const hasTablet = hasItem(state, 'drainage_tablet');
     actions.push({
       id: 'open_sluice',
       label: 'OPEN SLUICE',
       iconName: 'Unlock',
       command: 'open sluice',
       primary: hasFish && hasTablet,
-      tooltip: (!hasFish || !hasTablet) ? 'You need the Bronze Fish key and Drainage Tablet first' : undefined,
+      tooltip: (!hasFish || !hasTablet) ? 'Needs Bronze Fish key + Drainage Tablet' : undefined,
     });
   }
-
-  if (state.unlockedRooms.elements) {
-    actions.push({ ...NAV_FORWARD, label: 'WADE FORWARD', command: 'wade forward' });
+  if (solved) {
+    actions.push(nav('WADE FORWARD', 'wade forward'));
   }
 
   actions.push({ id: 'ask_temple', label: 'ASK TEMPLE', iconName: 'Flame', command: 'ask temple' });
@@ -225,29 +220,33 @@ function floodedActions(state: GameState): ActionButton[] {
   return actions;
 }
 
+// ── ELEMENTS ──────────────────────────────────────────────────────────────────
 function elementsActions(state: GameState): ActionButton[] {
+  const solved = puzzleSolved(state, 'elements');
+  const inspectedDone = stepDone(state, 'elements', 'elements_s1');
+  const ritualReadDone = stepDone(state, 'elements', 'elements_s2');
+  const data = state.roomFlags.elements?.customData as Record<string, boolean> ?? {};
   const actions: ActionButton[] = [];
-  const solved = roomSolved(state, 'elements');
 
-  actions.push({ id: 'inspect_shrines', label: 'INSPECT SHRINES', iconName: 'Search', command: 'inspect shrines' });
+  if (!inspectedDone) {
+    actions.push({ id: 'inspect_shrines', label: 'INSPECT SHRINES', iconName: 'Search', command: 'inspect shrines', primary: true });
+  } else {
+    actions.push({ id: 'inspect_shrines', label: 'INSPECT SHRINES', iconName: 'Search', command: 'inspect shrines' });
+  }
   actions.push({ id: 'look_around', label: 'LOOK AROUND', iconName: 'Eye', command: 'look around' });
-  actions.push({ id: 'read_ritual', label: 'READ RITUAL', iconName: 'FileText', command: 'read ritual' });
 
-  if (!solved) {
-    const hasVessel = hasItem(state, 'ember_vessel');
-    actions.push({
-      id: 'kindle_shrine',
-      label: 'KINDLE SHRINE',
-      iconName: 'Flame',
-      command: 'kindle shrine',
-      primary: actionDone(state, 'elements_read_ritual'),
-      tooltip: !hasVessel ? 'Find a vessel to carry ritual fire' : undefined,
-    });
-    actions.push({ id: 'rotate_basin', label: 'ROTATE BASIN', iconName: 'RotateCw', command: 'rotate basin' });
+  if (inspectedDone && !ritualReadDone) {
+    actions.push({ id: 'read_ritual', label: 'READ RITUAL', iconName: 'FileText', command: 'read ritual', primary: true });
   }
 
-  if (state.unlockedRooms.sanctum) {
-    actions.push({ ...NAV_FORWARD, label: 'MOVE INWARD', command: 'move inward' });
+  if (ritualReadDone && !solved) {
+    if (!data.earth) actions.push({ id: 'kindle_earth', label: 'KINDLE EARTH', iconName: 'Mountain', command: 'kindle earth shrine', primary: true });
+    else if (!data.water) actions.push({ id: 'kindle_water', label: 'KINDLE WATER', iconName: 'Droplets', command: 'kindle water shrine', primary: true });
+    else if (!data.fire) actions.push({ id: 'kindle_fire', label: 'KINDLE FIRE', iconName: 'Flame', command: 'kindle fire shrine', primary: true });
+    else if (!data.air) actions.push({ id: 'kindle_air', label: 'KINDLE AIR', iconName: 'Wind', command: 'kindle air shrine', primary: true });
+  }
+  if (solved) {
+    actions.push(nav('MOVE INWARD', 'move inward'));
   }
 
   actions.push({ id: 'ask_guide', label: 'ASK GUIDE', iconName: 'Compass', command: 'ask explorer guide' });
@@ -255,28 +254,36 @@ function elementsActions(state: GameState): ActionButton[] {
   return actions;
 }
 
+// ── SANCTUM ───────────────────────────────────────────────────────────────────
 function sanctumActions(state: GameState): ActionButton[] {
+  const solved = puzzleSolved(state, 'sanctum');
+  const approachedDone = stepDone(state, 'sanctum', 'sanctum_s1');
+  const inscriptionDone = stepDone(state, 'sanctum', 'sanctum_s2');
+  const hasRelics = state.inventory.some((i) => i.category === 'relic');
   const actions: ActionButton[] = [];
-  const solved = roomSolved(state, 'sanctum');
 
-  actions.push({ id: 'inspect_statue', label: 'INSPECT STATUE', iconName: 'Search', command: 'inspect statue' });
+  if (!approachedDone) {
+    actions.push({ id: 'inspect_statue', label: 'INSPECT STATUE', iconName: 'Search', command: 'inspect statue', primary: true });
+  } else {
+    actions.push({ id: 'inspect_statue', label: 'INSPECT STATUE', iconName: 'Search', command: 'inspect statue' });
+  }
   actions.push({ id: 'look_around', label: 'LOOK AROUND', iconName: 'Eye', command: 'look around' });
-  actions.push({ id: 'read_inscription', label: 'READ INSCRIPTION', iconName: 'FileText', command: 'read inscription' });
 
-  if (!solved) {
-    const hasRelics = state.inventory.some((i) => i.category === 'relic');
+  if (approachedDone && !inscriptionDone) {
+    actions.push({ id: 'read_inscription', label: 'READ PEDESTAL', iconName: 'FileText', command: 'read inscription', primary: true });
+  }
+  if (inscriptionDone && !solved) {
     actions.push({
       id: 'make_offering',
       label: 'MAKE OFFERING',
       iconName: 'Sparkles',
       command: 'make offering',
       primary: hasRelics,
-      tooltip: !hasRelics ? 'Gather sacred relics from the temple first' : undefined,
+      tooltip: !hasRelics ? 'Gather sacred relics first' : undefined,
     });
   }
-
-  if (state.unlockedRooms.final) {
-    actions.push({ ...NAV_FORWARD, label: 'MOVE DEEPER', command: 'move deeper' });
+  if (solved) {
+    actions.push(nav('MOVE DEEPER', 'move deeper'));
   }
 
   actions.push({ id: 'ask_temple', label: 'ASK TEMPLE', iconName: 'Flame', command: 'ask temple' });
@@ -284,17 +291,26 @@ function sanctumActions(state: GameState): ActionButton[] {
   return actions;
 }
 
+// ── FINAL ─────────────────────────────────────────────────────────────────────
 function finalActions(state: GameState): ActionButton[] {
+  const solved = puzzleSolved(state, 'final');
+  const inspectedDone = stepDone(state, 'final', 'final_s1');
+  const coreReadDone = stepDone(state, 'final', 'final_s2');
   const actions: ActionButton[] = [];
-  const solved = roomSolved(state, 'final');
 
-  actions.push({ id: 'inspect_relic', label: 'INSPECT RELIC', iconName: 'Search', command: 'inspect relic' });
-  actions.push({ id: 'look_around', label: 'LOOK AROUND', iconName: 'Eye', command: 'look around' });
-  actions.push({ id: 'read_core', label: 'READ CORE', iconName: 'FileText', command: 'read core' });
-
+  if (!inspectedDone) {
+    actions.push({ id: 'inspect_relic', label: 'INSPECT THE EYE', iconName: 'Search', command: 'inspect relic', primary: true });
+  }
+  if (inspectedDone && !coreReadDone) {
+    actions.push({ id: 'read_core', label: 'READ THE CORE', iconName: 'FileText', command: 'read core', primary: true });
+  }
+  if (coreReadDone && !solved) {
+    actions.push({ id: 'take_relic', label: 'ACCEPT THE EYE', iconName: 'Hand', command: 'take relic', primary: true });
+    actions.push({ id: 'refuse_relic', label: 'REFUSE THE EYE', iconName: 'ShieldAlert', command: 'refuse relic' });
+    actions.push({ id: 'return_relic', label: 'RESTORE THE EYE', iconName: 'RefreshCw', command: 'return relic' });
+  }
   if (!solved) {
-    actions.push({ id: 'take_relic', label: 'TAKE RELIC', iconName: 'Hand', command: 'take relic', primary: true });
-    actions.push({ id: 'refuse_relic', label: 'REFUSE RELIC', iconName: 'ShieldAlert', command: 'refuse relic' });
+    actions.push({ id: 'look_around', label: 'LOOK AROUND', iconName: 'Eye', command: 'look around' });
   }
 
   actions.push({ id: 'ask_temple', label: 'ASK TEMPLE', iconName: 'Flame', command: 'ask temple' });
@@ -302,9 +318,8 @@ function finalActions(state: GameState): ActionButton[] {
   return actions;
 }
 
-// ── Public API ─────────────────────────────────────────────────────────────────
-
-const ROOM_ACTION_GENERATORS: Record<RoomId, (state: GameState) => ActionButton[]> = {
+// ── Registry + export ─────────────────────────────────────────────────────────
+const GENERATORS: Record<RoomId, (s: GameState) => ActionButton[]> = {
   entrance: entranceActions,
   guardians: guardiansActions,
   echoes: echoesActions,
@@ -316,12 +331,8 @@ const ROOM_ACTION_GENERATORS: Record<RoomId, (state: GameState) => ActionButton[
   final: finalActions,
 };
 
-/**
- * Returns the dynamic action list for the player's current room.
- * Call this every render to get an up-to-date button set.
- */
 export function getActionsForRoom(state: GameState): ActionButton[] {
-  const generator = ROOM_ACTION_GENERATORS[state.currentRoomId];
-  if (!generator) return [MORE_BTN];
-  return generator(state);
+  const gen = GENERATORS[state.currentRoomId];
+  if (!gen) return [MORE_BTN];
+  return gen(state);
 }

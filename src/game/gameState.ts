@@ -158,6 +158,8 @@ export function buildInitialGameState(): GameState {
       { turn: 1, text: 'Crossed the ancient threshold into the Lost Temple of Rudra.', roomId: 'entrance' },
     ],
 
+    puzzleProgress: {},
+
     isCollapsing: false,
     gameCompleted: false,
   };

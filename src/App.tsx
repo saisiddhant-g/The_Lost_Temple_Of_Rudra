@@ -102,6 +102,10 @@ export default function App() {
       if (result.stateUpdate.roomFlags) {
         next.roomFlags = { ...gs.roomFlags, ...result.stateUpdate.roomFlags };
       }
+      // merge puzzleProgress deeply so steps from different rooms are preserved
+      if (result.stateUpdate.puzzleProgress) {
+        next.puzzleProgress = { ...gs.puzzleProgress, ...result.stateUpdate.puzzleProgress };
+      }
     }
 
     // Items added

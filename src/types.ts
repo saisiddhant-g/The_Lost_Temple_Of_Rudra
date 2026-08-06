@@ -107,6 +107,9 @@ export interface GameState {
   completedActions: string[];      // globally-unique action ids that fired
   eventHistory: { turn: number; text: string; roomId: RoomId }[];
 
+  /** Runtime puzzle progress — keyed by puzzleId */
+  puzzleProgress: Record<string, PuzzleProgress>;
+
   isCollapsing: boolean;
   gameCompleted: boolean;
   gameEnding?: 'transformed' | 'escaped' | 'failed';
@@ -140,6 +143,65 @@ export interface RoomData {
   initialItems: string[];             // item ids available to collect on first visit
   objective: Omit<Objective, 'completed' | 'archived'>;
   entryJournalText?: string;          // auto-recorded when room is first entered
+}
+
+// ─── Puzzle Engine ────────────────────────────────────────────────────────────
+
+/** One discrete step inside a puzzle */
+export interface PuzzleStep {
+  id: string;
+  description: string;
+  /** command keywords that satisfy this step */
+  triggerKeywords: string[];
+  /** item ids that must be in inventory to attempt */
+  requiredItems?: string[];
+  /** narration shown when step is completed */
+  successNarration: string;
+  /** narration shown when attempted without required items */
+  missingItemNarration?: string;
+  /** journal entry recorded on success */
+  journalText?: string;
+  journalCategory?: JournalCategory;
+  /** items added to inventory on success */
+  rewardItems?: string[];
+  /** items consumed on success */
+  consumedItems?: string[];
+  /** objective task index to complete on success */
+  objectiveTaskIndex?: number;
+  /** audio event to play */
+  audioEvent?: 'click' | 'stone' | 'bell' | 'water';
+}
+
+/** Full puzzle definition — pure data, never mutated */
+export interface PuzzleDefinition {
+  id: string;
+  roomId: RoomId;
+  title: string;
+  description: string;
+  steps: PuzzleStep[];
+  /** Item ids that MUST be in inventory before puzzle can be started */
+  requiredItems?: string[];
+  /** Items added when ALL steps complete */
+  completionRewardItems?: string[];
+  /** Items consumed when ALL steps complete */
+  completionConsumedItems?: string[];
+  /** Room to unlock when all steps complete */
+  unlocksRoom?: RoomId;
+  /** Completion journal entry */
+  completionJournalText?: string;
+  /** Completion audio */
+  completionAudioEvent?: 'click' | 'stone' | 'bell' | 'water';
+  /** Narration on full puzzle completion */
+  completionNarration: string;
+}
+
+/** Mutable runtime state for one puzzle — stored in GameState.puzzleProgress */
+export interface PuzzleProgress {
+  puzzleId: string;
+  currentStepIndex: number;
+  completed: boolean;
+  failed: boolean;
+  stepsCompleted: string[];  // step ids
 }
 
 // ─── Command Result ───────────────────────────────────────────────────────────
