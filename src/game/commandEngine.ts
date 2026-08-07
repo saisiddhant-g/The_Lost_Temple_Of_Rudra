@@ -17,6 +17,11 @@ import {
   recordPlayerDecision, recordHiddenDiscovery, recordDangerousChoice,
   recordItemIgnored,
 } from './templeMemoryEngine';
+import {
+  getTorchDescription, getTorchBrightness, getFloodDescription,
+  getStabilityDescription, buildWorldStatusPrefix, checkSecretTrigger,
+  applyStabilityDelta,
+} from './worldEngine';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -86,7 +91,8 @@ function handleExamine(state: GameState, target: string): CommandResult {
 // ── Global: use item ──────────────────────────────────────────────────────────
 function handleUse(state: GameState, target: string): CommandResult {
   if (target.includes('torch') || target.includes('ancient torch')) {
-    return ok(`You raise the Ancient Torch. The gold flame finds hidden wall channels — carved conduits that once carried water or air. Torch fuel: ${state.playerStats.torchFuel}%.`);
+    const desc = getTorchDescription(state.playerStats.torchFuel);
+    return ok(desc);
   }
   if (target.includes('map') || target.includes('temple map')) {
     return ok('You unfold the Temple Map. You are at room ' + (ROOM_SEQUENCE.indexOf(state.currentRoomId) + 1) + ' of 9. The map\'s question marks cluster around the later chambers.');
@@ -101,9 +107,10 @@ function handleUse(state: GameState, target: string): CommandResult {
   }
   if (target.includes('oil flask') || target.includes('oil')) {
     if (!hasItem(state, 'oil_flask')) return ok('You reached for the Oil Flask — it\'s already gone.');
-    return ok('You tip the Oil Flask against the torch. The flame doubles in size. Torch fuel extended.', {
+    const newFuel = Math.min(100, state.playerStats.torchFuel + 25);
+    return ok(`You tip the Oil Flask against the torch. The flame doubles in size — ${getTorchDescription(newFuel)}`, {
       itemsRemoved: ['oil_flask'],
-      stateUpdate: { playerStats: { ...state.playerStats, torchFuel: Math.min(100, state.playerStats.torchFuel + 25) } },
+      stateUpdate: { playerStats: { ...state.playerStats, torchFuel: newFuel } },
       journalEntry: jEntry('Refuelled torch with ritual oil. Burns brighter and cleaner.'),
     });
   }
@@ -125,55 +132,60 @@ function handleUse(state: GameState, target: string): CommandResult {
 
 // ENTRANCE: look around (always available, not a puzzle step)
 function entranceLook(state: GameState): CommandResult {
+  const prefix = buildWorldStatusPrefix(state);
   if (isPuzzleStepDone(state, 'puzzle_entrance', 'entrance_s1')) {
-    return ok('You\'ve read the inscription. The hidden symbols are now visible as faint heat-marks where the torch exposed them. The brazier bracket waits.');
+    return ok(prefix + 'You\'ve read the inscription. The hidden symbols are now visible as faint heat-marks where the torch exposed them. The brazier bracket waits.');
   }
-  return ok('Cold rain glimmers on the lion sentinels. Sanskrit verses cover the entrance archway. An iron brazier bracket sits cold and dry beside the sealed gate.', {
+  return ok(prefix + 'Cold rain glimmers on the lion sentinels. Sanskrit verses cover the entrance archway. An iron brazier bracket sits cold and dry beside the sealed gate.', {
     stateUpdate: { playerStats: { ...state.playerStats, curiosityScore: Math.min(100, state.playerStats.curiosityScore + 3) } },
   });
 }
 
 // GUARDIANS: look around
 function guardiansLook(state: GameState): CommandResult {
+  const prefix = buildWorldStatusPrefix(state);
   if (roomSolved(state, 'guardians')) {
-    return ok('The sentinels face inward. The floor channels converge on the central altar, now illuminated. The northern arch is open.');
+    return ok(prefix + 'The sentinels face inward. The floor channels converge on the central altar, now illuminated. The northern arch is open.');
   }
-  return ok('Pale cobalt light from a ceiling fracture. Copper floor channels lead to the central altar. Four sentinels face outward — their quartz eyes reflect your torch in cardinal directions.', {
+  return ok(prefix + 'Pale cobalt light from a ceiling fracture. Copper floor channels lead to the central altar. Four sentinels face outward — their quartz eyes reflect your torch in cardinal directions.', {
     stateUpdate: { playerStats: { ...state.playerStats, curiosityScore: Math.min(100, state.playerStats.curiosityScore + 3) } },
   });
 }
 
 // ECHOES: look around
 function echoesLook(state: GameState): CommandResult {
+  const prefix = buildWorldStatusPrefix(state);
   const step1Done = isPuzzleStepDone(state, 'puzzle_echoes', 'echoes_s1');
   if (!step1Done) {
-    return ok('Damp reflective walls mirror your torchlight twice. A bronze resonance mechanism sits at the centre. Three alcoves ring the walls, each containing a small crystal.');
+    return ok(prefix + 'Damp reflective walls mirror your torchlight twice. A bronze resonance mechanism sits at the centre. Three alcoves ring the walls, each containing a small crystal.');
   }
-  return ok('The three alcove crystals pulse faintly — they remember the tones you activated. The central orb waits for the completing resonance.');
+  return ok(prefix + 'The three alcove crystals pulse faintly — they remember the tones you activated. The central orb waits for the completing resonance.');
 }
 
 // PUZZLE CHAMBER: look around
 function puzzleLook(state: GameState): CommandResult {
+  const prefix = buildWorldStatusPrefix(state);
   if (roomSolved(state, 'puzzle')) {
-    return ok('The plates are locked in cosmic sequence. Stairs descend below the open floor section.');
+    return ok(prefix + 'The plates are locked in cosmic sequence. Stairs descend below the open floor section.');
   }
   const decoded = isPuzzleStepDone(state, 'puzzle_chamber', 'puzzle_s2');
   if (decoded) {
-    return ok('The plates glow: Creation (north), Preservation (east), Dissolution (south), Grace (west), Blank (centre). You know the sequence. The rotation mechanism awaits.');
+    return ok(prefix + 'The plates glow: Creation (north), Preservation (east), Dissolution (south), Grace (west), Blank (centre). You know the sequence. The rotation mechanism awaits.');
   }
-  return ok('Five plates in a cross. The bioluminescent script shifts slightly as your torch moves. Carved stone serpents coil the walls.');
+  return ok(prefix + 'Five plates in a cross. The bioluminescent script shifts slightly as your torch moves. Carved stone serpents coil the walls.');
 }
 
 // LIBRARY: look around
 function libraryLook(state: GameState): CommandResult {
+  const prefix = buildWorldStatusPrefix(state);
   if (roomSolved(state, 'library')) {
-    return ok('The drainage tablet is secured in your pack. The hidden passage stairs are visible behind the shelving.');
+    return ok(prefix + 'The drainage tablet is secured in your pack. The hidden passage stairs are visible behind the shelving.');
   }
   const hasFragment = hasItem(state, 'missing_tablet_fragment');
   if (hasFragment) {
-    return ok('You have the missing fragment. The main drainage diagram is incomplete without it — place them together to read the full schematic.');
+    return ok(prefix + 'You have the missing fragment. The main drainage diagram is incomplete without it — place them together to read the full schematic.');
   }
-  return ok('Thousands of tablets. Clay ones whisper; slate ones are silent. Somewhere in the slate section, the drainage diagram waits — incomplete, with a fragment missing.');
+  return ok(prefix + 'Thousands of tablets. Clay ones whisper; slate ones are silent. Somewhere in the slate section, the drainage diagram waits — incomplete, with a fragment missing.');
 }
 
 // FLOODED: open sluice (item-gated special action)
@@ -193,6 +205,7 @@ function floodedOpenSluice(state: GameState): CommandResult {
     return ok('The Drainage Tablet confirms valve three is the drain. But the fish-symbol socket needs a purpose-made key — you don\'t have it yet. It must be somewhere nearby.');
   }
   const newFlags = { ...state.roomFlags.flooded, puzzleSolved: true, puzzleProgress: 100 };
+  const stabilityUpdate = applyStabilityDelta(state, 'puzzle_solved');
   return ok(
     'You insert the Bronze Fish key into the third valve\'s socket — exact fit. You turn. A deep hydraulic groan, then a roar as water cascades down into the aquifer. In sixty seconds the corridor floor is exposed bare stone.',
     {
@@ -203,6 +216,7 @@ function floodedOpenSluice(state: GameState): CommandResult {
         roomFlags: { ...state.roomFlags, flooded: newFlags },
         floodLevel: 0,
         playerStats: { ...state.playerStats, templeFavor: 'Favored' },
+        ...stabilityUpdate,
         puzzleProgress: {
           ...state.puzzleProgress,
           puzzle_flooded: {
@@ -359,6 +373,7 @@ function sanctumMakeOffering(state: GameState): CommandResult {
   const offeredNames = relics.map((r) => r.name).join(', ');
   const removedIds = relics.map((r) => r.id);
   const newFlags = { ...state.roomFlags.sanctum, puzzleSolved: true, puzzleProgress: 100 };
+  const stabilityBoost = applyStabilityDelta(state, 'offering_made');
 
   return ok(
     `You place the ${offeredNames} at the statue\'s feet. Each settles onto the gold inlay with a soft resonant tone. The obsidian eyes open — two columns of gold light fall from them. The floor parts and the passage to the Final Chamber is revealed.`,
@@ -370,6 +385,7 @@ function sanctumMakeOffering(state: GameState): CommandResult {
       stateUpdate: {
         roomFlags: { ...state.roomFlags, sanctum: newFlags },
         playerStats: { ...state.playerStats, templeFavor: 'Chosen', integrityScore: Math.min(100, state.playerStats.integrityScore + 20) },
+        ...stabilityBoost,
         puzzleProgress: {
           ...state.puzzleProgress,
           puzzle_sanctum: {
@@ -400,6 +416,7 @@ function finalEnding(state: GameState, cmd: string): CommandResult {
 
   // ACCEPT
   if (cmd.includes('take relic') || cmd.includes('claim') || cmd.includes('accept') || (cmd.includes('take') && !cmd.includes('refuse') && !cmd.includes('return'))) {
+    const stabilityPenalty = applyStabilityDelta(state, 'relic_taken');
     return ok(
       'You step into the violet light. The bronze lattice opens around your hand. A thousand years of intention — devotion, sacrifice, purpose — enters you at once. You are not the same person who crossed the threshold. The Eye is yours to carry into the world.',
       {
@@ -411,6 +428,7 @@ function finalEnding(state: GameState, cmd: string): CommandResult {
           gameCompleted: true,
           gameEnding: 'transformed',
           playerStats: { ...state.playerStats, greedScore: Math.min(100, state.playerStats.greedScore + 15) },
+          ...stabilityPenalty,
         },
         journalEntry: jEntry('Accepted the Eye of Rudra. The temple cycle is complete — I carry its memory forward.', 'teaching'),
         audioEvent: 'bell',
@@ -441,6 +459,7 @@ function finalEnding(state: GameState, cmd: string): CommandResult {
 
   // RETURN (put it back / restore it)
   if (cmd.includes('return relic') || cmd.includes('restore') || cmd.includes('put back') || cmd.includes('give back')) {
+    const stabilityRestore = applyStabilityDelta(state, 'relic_restored');
     return ok(
       'You lift the Eye and place it back in the altar\'s cradle. The bronze lattice closes. A tone plays — not a bell, something deeper — and then silence. The temple exhales. The passage out opens, and it is wider than the one you came in.',
       {
@@ -451,6 +470,7 @@ function finalEnding(state: GameState, cmd: string): CommandResult {
           gameCompleted: true,
           gameEnding: 'escaped',
           playerStats: { ...state.playerStats, integrityScore: Math.min(100, state.playerStats.integrityScore + 30), templeFavor: 'Chosen' },
+          ...stabilityRestore,
         },
         journalEntry: jEntry('Returned the Eye to its cradle. Restored the cycle. Left the temple whole.', 'teaching'),
         audioEvent: 'bell',
@@ -745,6 +765,39 @@ export function processCommand(state: GameState, commandStr: string): CommandRes
   }
   if (cmd === 'help' || cmd === 'commands' || cmd === '?') {
     return ok(`Room ${ROOM_SEQUENCE.indexOf(roomId) + 1} of 9 — ${getRoomTitle(roomId)}.\nUse the action buttons or type: inventory · examine <item> · use <item> · look around · ask temple · ask guide`);
+  }
+
+  // ── World status command ──────────────────────────────────────────────────
+  if (cmd === 'world status' || cmd === 'status' || cmd === 'temple status') {
+    const { playerStats, templeStability, floodLevel } = state;
+    const lines = [
+      getTorchDescription(playerStats.torchFuel),
+      roomId === 'flooded' ? getFloodDescription(floodLevel) : null,
+      `Temple Stability: ${templeStability}% — ${getStabilityDescription(templeStability)}`,
+    ].filter(Boolean);
+    return ok(lines.join('\n\n'));
+  }
+
+  // ── Secret discovery check (before puzzle engine) ─────────────────────────
+  const secret = checkSecretTrigger(state, cmd);
+  if (secret) {
+    return withNarrativeSideEffects(
+      ok(secret.description, {
+        journalEntry: jEntry(secret.journalText, 'discovery'),
+        stateUpdate: {
+          templeMemory: {
+            ...state.templeMemory,
+            hiddenDiscoveries: [...state.templeMemory.hiddenDiscoveries, secret.id],
+          },
+          playerStats: {
+            ...state.playerStats,
+            observationScore: Math.min(100, state.playerStats.observationScore + 8),
+          },
+        },
+      }),
+      state,
+      cmd,
+    );
   }
 
   // ── Movement ─────────────────────────────────────────────────────────────

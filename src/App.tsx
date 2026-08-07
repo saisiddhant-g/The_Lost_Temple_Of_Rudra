@@ -16,6 +16,7 @@ import { getItem } from './game/gameItems';
 import { recordRoomVisit, recordRelicCollected } from './game/templeMemoryEngine';
 import { applyTraitEvent } from './game/traitEngine';
 import { getGuideDiscoveryComment } from './game/dialogueEngine';
+import { getAmbientEvent, getRoomAtmosphere, computeTorchDecay } from './game/worldEngine';
 
 import {
   GameState, RoomId, RoomData, InventoryItem,
@@ -214,11 +215,27 @@ export default function App() {
     // Increment turn
     next.currentTurn = gs.currentTurn + 1;
 
-    // Torch fuel decay (1% per turn)
+    // Torch fuel decay — faster in wet rooms (via world engine)
+    const torchDecay = computeTorchDecay(next);
     next.playerStats = {
       ...next.playerStats,
-      torchFuel: Math.max(0, next.playerStats.torchFuel - 1),
+      torchFuel: Math.max(0, next.playerStats.torchFuel - torchDecay),
     };
+
+    // Auto-journal atmosphere note every 7 turns
+    const atmosphereNote = getRoomAtmosphere(next);
+    if (atmosphereNote) {
+      const alreadyLogged = next.journal.some(j => j.text === atmosphereNote.text);
+      if (!alreadyLogged) {
+        next.journal = [...next.journal, {
+          id: `j_atm_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,
+          text: atmosphereNote.text,
+          turn: next.currentTurn,
+          roomId: next.currentRoomId,
+          category: atmosphereNote.category,
+        }];
+      }
+    }
 
     // Sync templeFavor and resolve from current traits
     next.playerStats = deriveStatsFromTraits(next.playerStats, next.playerTraits);
@@ -307,8 +324,32 @@ export default function App() {
     if (result.audioEvent === 'stone') audioEngine.playStoneMovement();
     else if (result.audioEvent === 'bell') audioEngine.playResonanceBell();
 
-    pushNarration(result.narration);
-    setGameState(nextGs);
+    // Ambient event injection (non-blocking, ~20% chance)
+    const ambient = getAmbientEvent(nextGs);
+    const finalNarration = ambient
+      ? result.narration + '\n\n' + ambient.text
+      : result.narration;
+
+    // Auto-journal ambient events that are world-significant
+    let finalGs = nextGs;
+    if (ambient?.journalWorthy) {
+      const alreadyLogged = finalGs.journal.some(j => j.text === ambient.text);
+      if (!alreadyLogged) {
+        finalGs = {
+          ...finalGs,
+          journal: [...finalGs.journal, {
+            id: `j_amb_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,
+            text: ambient.text,
+            turn: finalGs.currentTurn,
+            roomId: finalGs.currentRoomId,
+            category: 'event' as const,
+          }],
+        };
+      }
+    }
+
+    pushNarration(finalNarration);
+    setGameState(finalGs);
 
     // End game
     if (result.endGame) {
@@ -316,8 +357,7 @@ export default function App() {
     }
 
     // Enhance narration via backend AI (non-blocking, optional)
-    const keyAtDispatch = narrationKey + 1;
-    try {
+    const keyAtDispatch = narrationKey + 1;    try {
       const res = await fetch('/api/command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
