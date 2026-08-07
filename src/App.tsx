@@ -13,12 +13,45 @@ import { buildInitialGameState, saveGameState, loadGameState, clearGameState } f
 import { getActionsForRoom } from './game/actionEngine';
 import { processCommand } from './game/commandEngine';
 import { getItem } from './game/gameItems';
+import { recordRoomVisit, recordRelicCollected } from './game/templeMemoryEngine';
+import { applyTraitEvent } from './game/traitEngine';
+import { getGuideDiscoveryComment } from './game/dialogueEngine';
 
 import {
   GameState, RoomId, RoomData, InventoryItem,
   Objective, JournalEntry, EvaluationMetrics, WorldModel,
+  PlayerTraits, PlayerStats,
 } from './types';
 import { audioEngine } from './audio/audioEngine';
+
+// ── Derive dynamic PlayerStats values from traits ─────────────────────────────
+function deriveStatsFromTraits(stats: PlayerStats, traits: PlayerTraits): PlayerStats {
+  // templeFavor: driven by wisdom, compassion, observation vs greed, recklessness
+  const favorScore = traits.wisdom + traits.compassion + traits.observation
+    - traits.greed * 1.5 - traits.recklessness;
+  let templeFavor: PlayerStats['templeFavor'] = stats.templeFavor;
+  if (favorScore > 200) templeFavor = 'Chosen';
+  else if (favorScore > 150) templeFavor = 'Recognised';
+  else if (favorScore > 100) templeFavor = 'Favored';
+  else if (favorScore > 60) templeFavor = 'Curious';
+  else if (favorScore > 20) templeFavor = 'Watched';
+  else if (favorScore > -20) templeFavor = 'Neutral';
+  else if (favorScore > -60) templeFavor = 'Tested';
+  else templeFavor = 'Wary';
+
+  // resolve: driven by courage, patience vs recklessness, greed
+  const resolveScore = traits.courage + traits.patience - traits.recklessness - traits.greed * 0.5;
+  let resolve: PlayerStats['resolve'] = stats.resolve;
+  if (resolveScore > 150) resolve = 'Unbroken';
+  else if (resolveScore > 100) resolve = 'Hardened';
+  else if (resolveScore > 60) resolve = 'Resolute';
+  else if (resolveScore > 20) resolve = 'Steady';
+  else if (resolveScore > -10) resolve = 'Uneasy';
+  else if (resolveScore > -40) resolve = 'Fraying';
+  else resolve = 'Thin';
+
+  return { ...stats, templeFavor, resolve };
+}
 
 // ── Adapter: GameState → legacy WorldModel shape for existing components ──────
 function toWorldModel(gs: GameState): WorldModel {
@@ -30,6 +63,7 @@ function toWorldModel(gs: GameState): WorldModel {
     journal: gs.journal,
     evaluation: {
       torch: gs.playerStats.torchFuel,
+      torchFuel: gs.playerStats.torchFuel,
       resolve: gs.playerStats.resolve,
       templeFavor: gs.playerStats.templeFavor,
       observationScore: gs.playerStats.observationScore,
@@ -95,7 +129,7 @@ export default function App() {
     // State patch from result
     if (result.stateUpdate) {
       next = { ...next, ...(result.stateUpdate as Partial<GameState>) };
-      // merge playerStats carefully
+      // merge nested objects carefully so partial updates don't wipe existing data
       if (result.stateUpdate.playerStats) {
         next.playerStats = { ...gs.playerStats, ...result.stateUpdate.playerStats };
       }
@@ -105,6 +139,19 @@ export default function App() {
       // merge puzzleProgress deeply so steps from different rooms are preserved
       if (result.stateUpdate.puzzleProgress) {
         next.puzzleProgress = { ...gs.puzzleProgress, ...result.stateUpdate.puzzleProgress };
+      }
+      // merge narrative systems
+      if (result.stateUpdate.playerTraits) {
+        next.playerTraits = { ...gs.playerTraits, ...result.stateUpdate.playerTraits };
+      }
+      if (result.stateUpdate.templeMemory) {
+        next.templeMemory = { ...gs.templeMemory, ...(result.stateUpdate.templeMemory as typeof gs.templeMemory) };
+      }
+      if (result.stateUpdate.hintState) {
+        next.hintState = { ...gs.hintState, ...(result.stateUpdate.hintState as typeof gs.hintState) };
+      }
+      if (result.stateUpdate.dialogueContext) {
+        next.dialogueContext = { ...gs.dialogueContext, ...(result.stateUpdate.dialogueContext as typeof gs.dialogueContext) };
       }
     }
 
@@ -173,6 +220,9 @@ export default function App() {
       torchFuel: Math.max(0, next.playerStats.torchFuel - 1),
     };
 
+    // Sync templeFavor and resolve from current traits
+    next.playerStats = deriveStatsFromTraits(next.playerStats, next.playerTraits);
+
     return next;
   }, []);
 
@@ -224,6 +274,25 @@ export default function App() {
         nextGs.previousRoomId = gs.currentRoomId;
         nextGs.currentTurn += 1;
         nextGs.playerStats = { ...nextGs.playerStats, torchFuel: Math.max(0, nextGs.playerStats.torchFuel - 1) };
+        // Record room visit in temple memory + courage trait
+        nextGs.templeMemory = recordRoomVisit(nextGs.templeMemory, nextId);
+        nextGs.playerTraits = applyTraitEvent(nextGs.playerTraits, 'new_room_entered');
+        // Sync stats from traits after entering new room
+        nextGs.playerStats = deriveStatsFromTraits(nextGs.playerStats, nextGs.playerTraits);
+        // Auto-journal: guide comment on first room entry
+        const roomEntryComment = getGuideDiscoveryComment(nextGs, 'room_entered');
+        if (roomEntryComment) {
+          const alreadyLogged = nextGs.journal.some(j => j.text === roomEntryComment);
+          if (!alreadyLogged) {
+            nextGs.journal = [...nextGs.journal, {
+              id: `j_guide_entry_${nextId}_${Date.now()}`,
+              text: roomEntryComment,
+              turn: nextGs.currentTurn,
+              roomId: nextId,
+              category: 'observation',
+            }];
+          }
+        }
       }
 
       setGameState(nextGs);

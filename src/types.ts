@@ -110,6 +110,18 @@ export interface GameState {
   /** Runtime puzzle progress — keyed by puzzleId */
   puzzleProgress: Record<string, PuzzleProgress>;
 
+  /** Temple's living memory — persists full playthrough */
+  templeMemory: TempleMemory;
+
+  /** Hidden player trait scores */
+  playerTraits: PlayerTraits;
+
+  /** Hint progression state */
+  hintState: HintState;
+
+  /** Dialogue dedup context */
+  dialogueContext: DialogueContext;
+
   isCollapsing: boolean;
   gameCompleted: boolean;
   gameEnding?: 'transformed' | 'escaped' | 'failed';
@@ -204,7 +216,58 @@ export interface PuzzleProgress {
   stepsCompleted: string[];  // step ids
 }
 
-// ─── Command Result ───────────────────────────────────────────────────────────
+// ─── Temple Memory ────────────────────────────────────────────────────────────
+
+export interface TempleMemory {
+  roomsVisited: RoomId[];
+  puzzlesSolved: string[];           // puzzleIds
+  failedAttempts: Record<string, number>; // puzzleId → count of failed tries
+  hintsRequested: Record<string, number>; // roomId → count
+  relicsCollected: string[];         // item ids
+  itemsIgnored: string[];            // item ids seen but not taken
+  dangerousChoices: string[];        // action ids flagged as risky
+  moralChoices: { turn: number; choice: string; tag: 'noble' | 'greedy' | 'neutral' }[];
+  explorationActions: number;        // total look-around / inspect counts
+  hiddenDiscoveries: string[];       // ids of hidden things found
+  loreRead: number;                  // count of inscription/carving reads
+  guideConversations: number;        // times guide was asked
+  templeConversations: number;       // times temple was asked
+  lastTempleWhisper: string;         // last whisper text (dedup)
+  lastGuideResponse: string;         // last guide text (dedup)
+  consecutiveFails: number;          // fails in a row without progress
+  consecutiveSolves: number;         // rooms solved in a row without hints
+  playerDecisions: { turn: number; roomId: RoomId; decision: string }[];
+}
+
+// ─── Player Traits ────────────────────────────────────────────────────────────
+
+export interface PlayerTraits {
+  curiosity: number;       // 0–100  explore & inspect
+  wisdom: number;          // 0–100  read lore, follow clues
+  courage: number;         // 0–100  move forward without hints
+  greed: number;           // 0–100  take unnecessary relics
+  compassion: number;      // 0–100  careful / patient choices
+  patience: number;        // 0–100  slow methodical exploration
+  recklessness: number;    // 0–100  repeated fails, rushed choices
+  observation: number;     // 0–100  inspect, examine, look carefully
+}
+
+// ─── Hint State ───────────────────────────────────────────────────────────────
+
+export interface HintState {
+  roomHintLevel: Record<RoomId, 0 | 1 | 2 | 3>; // 0 = no hint given yet
+  roomFailCount: Record<RoomId, number>;          // failed attempts per room
+  roomHintUsed: Record<RoomId, string[]>;         // hint texts already shown
+  lastHintTurn: Record<RoomId, number>;           // turn last hint was given
+}
+
+// ─── Dialogue Context ─────────────────────────────────────────────────────────
+
+export interface DialogueContext {
+  templeWhistersLog: string[];   // dedup log — never repeat
+  guideResponseLog: string[];    // dedup log — never repeat
+  lastConversationTurn: number;
+}
 export interface CommandResult {
   narration: string;
   stateUpdate: Partial<GameState> | null;

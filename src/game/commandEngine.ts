@@ -7,6 +7,16 @@
 import { GameState, CommandResult, RoomId, JournalCategory } from '../types';
 import { getItem } from './gameItems';
 import { tryAdvancePuzzle, isPuzzleStepDone, isRoomPuzzleComplete } from './puzzleEngine';
+import { getTempleWhisper, getGuideResponse, getGuideDiscoveryComment, generateFieldNote } from './dialogueEngine';
+import { getHint, recordRoomFail, isPlayerStuck } from './hintEngine';
+import { applyTraitEvent, commandToTraitEvent } from './traitEngine';
+import {
+  recordHintRequested, recordTempleAsked, recordExplorationAction,
+  recordLoreRead, recordRelicCollected, recordMoralChoice,
+  recordFailedAttempt, setLastTempleWhisper, setLastGuideResponse,
+  recordPlayerDecision, recordHiddenDiscovery, recordDangerousChoice,
+  recordItemIgnored,
+} from './templeMemoryEngine';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -454,82 +464,53 @@ function finalEnding(state: GameState, cmd: string): CommandResult {
 
 // ── Temple / Guide responses per room ─────────────────────────────────────────
 function handleTemple(state: GameState): CommandResult {
-  const responses: Record<RoomId, string[]> = {
-    entrance: ['"Only those who bear light into the dark shall pass."', '"The name below is the lock. Fire speaks the key."'],
-    guardians: ['"The sentinels watch those who rush in haste."', '"Turn their gaze inward and the path opens without sound."'],
-    echoes: ['"Harmony yields passage where force achieves nothing."', '"The mountain breathes at 432Hz — match it."'],
-    puzzle: ['"The blank plate is the unspeakable syllable. It is already correct."', '"Creation. Preservation. Dissolution. This is the cycle."'],
-    library: ['"Truth rests quietly among a thousand whispering falsehoods."', '"The fragment you need is closer than the whispers suggest."'],
-    flooded: ['"Water obeys the vessel that understands its channel."', '"The fish marks the third mouth. Do not touch the first."'],
-    elements: ['"Earth holds. Water carries. Fire changes. Air remains."', '"Kindle them in order and the circuit closes."'],
-    sanctum: ['"Offer without greed and receive vision. Offer with greed and receive silence."', '"The empty hand is the gesture of receiving."'],
-    final: ['"Thousands of years of waiting conclude with you."', '"The cycle accepts either answer."'],
-  };
-  const options = responses[state.currentRoomId] ?? ['"The temple listens."'];
-  return ok(options[state.currentTurn % options.length]);
+  const { whisper, newContext } = getTempleWhisper(state);
+  const newMem = setLastTempleWhisper(
+    recordTempleAsked(state.templeMemory),
+    whisper,
+  );
+  return ok(whisper, {
+    stateUpdate: {
+      templeMemory: newMem,
+      dialogueContext: newContext,
+    },
+    journalEntry: {
+      text: whisper,
+      category: 'teaching',
+    },
+  });
 }
 
 function handleGuide(state: GameState): CommandResult {
-  const guides: Record<RoomId, string[]> = {
-    entrance: [
-      'Guide: "Read the inscription first — it hints at what to do next."',
-      'Guide: "The hidden symbols appear when heat is applied directly to the stone. Try your torch."',
-      'Guide: "Light the iron bracket beside the gate. That\'s the brazier."',
-    ],
-    guardians: [
-      'Guide: "Study the floor channels first — they tell you the correct orientation."',
-      'Guide: "Read the pedestal carvings. They\'re the instruction manual."',
-      'Guide: "Rotate all four statues so they face inward. Don\'t look at their faces while doing it."',
-    ],
-    echoes: [
-      'Guide: "Stand still and listen. The echo interval is the key measurement."',
-      'Guide: "The three alcove crystals need to be activated — touch each one."',
-      'Guide: "Once the crystals are active, touch the central orb with a crystal fragment."',
-    ],
-    puzzle: [
-      'Guide: "Inspect the plates carefully — count them, note which one is blank."',
-      'Guide: "Decode the Sanskrit symbols — the cosmic cycle gives you the order."',
-      'Guide: "Creation north, Preservation east, Dissolution south. The blank plate stays where it is."',
-    ],
-    library: [
-      'Guide: "Clay tablets whisper lies. Slate tablets are silent truth. Look for slate."',
-      'Guide: "There\'s a missing fragment somewhere on the floor between the shelves."',
-      'Guide: "Read the combined diagram before taking the tablet — know what you\'re carrying."',
-    ],
-    flooded: [
-      'Guide: "Use the rope to probe depth before wading — you can\'t see the bottom."',
-      'Guide: "Something\'s on the floor — reach down and retrieve it before draining."',
-      'Guide: "Third valve, fish symbol. You need both the diagram and the key."',
-    ],
-    elements: [
-      'Guide: "Inspect all four shrines first — learn what each element looks like."',
-      'Guide: "Read the floor inscription — it gives the exact order."',
-      'Guide: "Earth first. Always earth first. Then water, fire, air."',
-    ],
-    sanctum: [
-      'Guide: "Inspect the statue — Rudra\'s posture tells you what it expects."',
-      'Guide: "Read the pedestal inscription before offering anything."',
-      'Guide: "Bring all the relics you\'ve collected. The Ember Vessel is essential."',
-    ],
-    final: [
-      'Guide: "Inspect the Eye first. Let it show you what it is."',
-      'Guide: "Read the core — let it speak to you before you decide."',
-      'Guide: "Take it, refuse it, or restore it. All three are valid. Choose what fits who you are."',
-    ],
-  };
-  const options = guides[state.currentRoomId] ?? ['Guide: "Trust the process."'];
-  // Progressive hints — reveal more detail as turns increase in the room
-  const stepsDone = Object.keys(state.puzzleProgress[ROOM_PUZZLE_MAP_LOCAL[state.currentRoomId] ?? '']?.stepsCompleted ?? {}).length;
-  const idx = Math.min(stepsDone, options.length - 1);
-  return ok(options[idx]);
-}
+  const roomId = state.currentRoomId;
+  const { text: hintText, newHintState, levelUsed } = getHint(state, roomId);
+  const { response, newContext } = getGuideResponse(state, hintText, levelUsed);
 
-const ROOM_PUZZLE_MAP_LOCAL: Record<RoomId, string> = {
-  entrance: 'puzzle_entrance', guardians: 'puzzle_guardians',
-  echoes: 'puzzle_echoes', puzzle: 'puzzle_chamber',
-  library: 'puzzle_library', flooded: 'puzzle_flooded',
-  elements: 'puzzle_elements', sanctum: 'puzzle_sanctum', final: 'puzzle_final',
-};
+  const newMem = setLastGuideResponse(
+    recordHintRequested(state.templeMemory, roomId),
+    response,
+  );
+
+  // Apply recklessness penalty for asking guide early
+  const failCount = state.hintState.roomFailCount[roomId] ?? 0;
+  const traitEvent = failCount === 0 ? 'request_hint' : null;
+  const newTraits = traitEvent
+    ? applyTraitEvent(state.playerTraits, traitEvent)
+    : state.playerTraits;
+
+  return ok(response, {
+    stateUpdate: {
+      templeMemory: newMem,
+      hintState: newHintState,
+      dialogueContext: newContext,
+      playerTraits: newTraits,
+    },
+    journalEntry: {
+      text: response,
+      category: 'observation',
+    },
+  });
+}
 
 // ── Movement ──────────────────────────────────────────────────────────────────
 function handleMovement(state: GameState): CommandResult {
@@ -576,6 +557,174 @@ function getRoomTitle(roomId: RoomId): string {
   return t[roomId] ?? roomId;
 }
 
+// ── Narrative side-effects wrapper ────────────────────────────────────────────
+/**
+ * Wraps any CommandResult with automatic trait, memory, and hint updates
+ * based on the command that produced it. Merges the additional stateUpdate
+ * cleanly without overwriting result-specific updates.
+ */
+function withNarrativeSideEffects(
+  result: CommandResult,
+  state: GameState,
+  cmd: string,
+): CommandResult {
+  let newTraits = { ...state.playerTraits };
+  let newMem = { ...state.templeMemory };
+  let newHintState = { ...state.hintState };
+  const roomId = state.currentRoomId;
+
+  // ── Trait event from command ───────────────────────────────────────────
+  const traitEvent = commandToTraitEvent(cmd);
+  if (traitEvent) {
+    newTraits = applyTraitEvent(newTraits, traitEvent);
+  }
+
+  // ── Memory: exploration ────────────────────────────────────────────────
+  if (cmd.includes('look') || cmd.includes('inspect') || cmd.includes('examine') || cmd.includes('survey')) {
+    newMem = recordExplorationAction(newMem);
+  }
+
+  // ── Memory: lore read ──────────────────────────────────────────────────
+  if (cmd.includes('read') || cmd.includes('decode') || cmd.includes('translate') || cmd.includes('carvings') || cmd.includes('inscription')) {
+    newMem = recordLoreRead(newMem);
+    newTraits = applyTraitEvent(newTraits, 'read_lore');
+  }
+
+  // ── Memory + trait: relic and hidden items collected ──────────────────
+  if (result.itemsAdded) {
+    for (const itemId of result.itemsAdded) {
+      const item = state.inventory.find(i => i.id === itemId);
+      const isRelic = item?.category === 'relic' || [
+        'resonance_shard', 'drainage_tablet', 'ember_vessel',
+        'submerged_relic', 'guardian_seal', 'temple_core_fragment',
+      ].includes(itemId);
+      if (isRelic) {
+        newMem = recordRelicCollected(newMem, itemId);
+        newTraits = applyTraitEvent(newTraits, 'collect_relic');
+      }
+      // Hidden discovery items
+      if (['hidden_symbol_rubbing', 'missing_tablet_fragment', 'echo_crystal_fragment'].includes(itemId)) {
+        newMem = recordHiddenDiscovery(newMem, itemId);
+        newTraits = applyTraitEvent(newTraits, 'discover_hidden');
+      }
+    }
+  }
+
+  // ── Memory + trait: puzzle solved ──────────────────────────────────────
+  const puzzleSolvedNow =
+    result.stateUpdate?.roomFlags?.[roomId as RoomId]?.puzzleSolved === true &&
+    !(state.roomFlags[roomId]?.puzzleSolved);
+  const completionAction = result.completedActionId ?? '';
+  const isPuzzleCompletion =
+    puzzleSolvedNow ||
+    completionAction.startsWith('puzzle_completed_') ||
+    completionAction === 'elements_sequence_complete' ||
+    completionAction === 'flooded_sluice_opened' ||
+    completionAction === 'library_tablet_taken' ||
+    completionAction === 'sanctum_offering_complete';
+
+  if (isPuzzleCompletion) {
+    const usedHints = (newMem.hintsRequested[roomId] ?? 0) > 0;
+    newTraits = applyTraitEvent(newTraits, usedHints ? 'solve_puzzle_hint' : 'solve_puzzle_no_hint');
+    if (!newMem.puzzlesSolved.includes(`puzzle_${roomId}`)) {
+      newMem = {
+        ...newMem,
+        puzzlesSolved: [...newMem.puzzlesSolved, `puzzle_${roomId}`],
+        consecutiveFails: 0,
+        consecutiveSolves: newMem.consecutiveSolves + 1,
+      };
+    }
+  }
+
+  // ── Memory + hint: failed attempt — broadened detection ──────────────
+  const failureSignals = [
+    result.narration.includes('stonework absorbs'),
+    result.narration.includes('does not respond yet'),
+    result.narration.includes('without reaction'),
+    result.narration.includes('stirs but does not light'),
+    result.narration.includes('flares briefly then dies'),
+    result.narration.includes('remains cold'),
+    result.narration.includes('slides back to neutral'),
+    result.narration.includes('cannot be certain'),
+    result.narration.includes('haven\'t read'),
+  ];
+  const isFallback = failureSignals.some(Boolean);
+
+  if (isFallback) {
+    newMem = recordFailedAttempt(newMem, `puzzle_${roomId}`);
+    newHintState = recordRoomFail(newHintState, roomId);
+    newTraits = applyTraitEvent(newTraits, 'failed_attempt');
+    if (newMem.consecutiveFails >= 3) {
+      newTraits = applyTraitEvent(newTraits, 'consecutive_fails');
+    }
+  }
+
+  // ── Dangerous choices ──────────────────────────────────────────────────
+  if (cmd.includes('first valve') || cmd.includes('second valve')) {
+    newMem = recordDangerousChoice(newMem, `risky_valve_${state.currentTurn}`);
+  }
+
+  // ── Moral choices ──────────────────────────────────────────────────────
+  if (completionAction === 'sanctum_offering_complete') {
+    newMem = recordMoralChoice(newMem, state.currentTurn, 'offered_relics', 'noble');
+    newTraits = applyTraitEvent(newTraits, 'offer_relic');
+    newMem = recordPlayerDecision(newMem, state.currentTurn, roomId, 'Made offering at Rudra\'s feet');
+  }
+  if (completionAction === 'final_accepted') {
+    newMem = recordMoralChoice(newMem, state.currentTurn, 'accepted_eye', 'greedy');
+    newTraits = applyTraitEvent(newTraits, 'accept_final_relic');
+    newMem = recordPlayerDecision(newMem, state.currentTurn, roomId, 'Accepted the Eye of Rudra');
+  }
+  if (completionAction === 'final_refused') {
+    newMem = recordMoralChoice(newMem, state.currentTurn, 'refused_eye', 'noble');
+    newTraits = applyTraitEvent(newTraits, 'refuse_final_relic');
+    newMem = recordPlayerDecision(newMem, state.currentTurn, roomId, 'Refused the Eye of Rudra');
+  }
+  if (completionAction === 'final_returned') {
+    newMem = recordMoralChoice(newMem, state.currentTurn, 'restored_eye', 'noble');
+    newTraits = applyTraitEvent(newTraits, 'restore_final_relic');
+    newMem = recordPlayerDecision(newMem, state.currentTurn, roomId, 'Restored the Eye of Rudra to its cradle');
+  }
+
+  // ── Auto-journal: guide discovery comments ────────────────────────────
+  // Appended as journal entry when no result-specific entry exists
+  let extraJournalText: string | null = null;
+  if (isPuzzleCompletion && !result.journalEntry) {
+    extraJournalText = getGuideDiscoveryComment(
+      { ...state, templeMemory: newMem },
+      'puzzle_solved',
+    );
+  } else if (
+    result.itemsAdded?.some(id =>
+      ['hidden_symbol_rubbing', 'missing_tablet_fragment', 'echo_crystal_fragment'].includes(id),
+    ) && !result.journalEntry
+  ) {
+    extraJournalText = getGuideDiscoveryComment(
+      { ...state, templeMemory: newMem },
+      'hidden_found',
+    );
+  } else if (isFallback && (newMem.consecutiveFails ?? 0) >= 2 && !result.journalEntry) {
+    extraJournalText = getGuideDiscoveryComment(
+      { ...state, templeMemory: newMem },
+      'failed_sequence',
+    );
+  }
+
+  // ── Merge into result.stateUpdate ─────────────────────────────────────
+  const existingUpdate = result.stateUpdate ?? {};
+  const mergedUpdate: Partial<typeof state> = {
+    ...existingUpdate,
+    playerTraits: { ...newTraits, ...(existingUpdate.playerTraits ?? {}) },
+    templeMemory: { ...newMem, ...(existingUpdate.templeMemory ?? {}) },
+    hintState: { ...newHintState, ...(existingUpdate.hintState ?? {}) },
+  };
+
+  const finalJournalEntry = result.journalEntry
+    ?? (extraJournalText ? { text: extraJournalText, category: 'observation' as const } : undefined);
+
+  return { ...result, stateUpdate: mergedUpdate, journalEntry: finalJournalEntry };
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function processCommand(state: GameState, commandStr: string): CommandResult {
@@ -588,11 +737,11 @@ export function processCommand(state: GameState, commandStr: string): CommandRes
   }
   if (cmd.startsWith('examine ') || (cmd.startsWith('inspect ') && !isRoomSpecificInspect(cmd, roomId))) {
     const target = cmd.replace(/^(examine|inspect)\s+/, '').trim();
-    return handleExamine(state, target);
+    return withNarrativeSideEffects(handleExamine(state, target), state, cmd);
   }
   if (cmd.startsWith('use ')) {
     const target = cmd.replace(/^use\s+/, '').trim();
-    return handleUse(state, target);
+    return withNarrativeSideEffects(handleUse(state, target), state, cmd);
   }
   if (cmd === 'help' || cmd === 'commands' || cmd === '?') {
     return ok(`Room ${ROOM_SEQUENCE.indexOf(roomId) + 1} of 9 — ${getRoomTitle(roomId)}.\nUse the action buttons or type: inventory · examine <item> · use <item> · look around · ask temple · ask guide`);
@@ -605,33 +754,34 @@ export function processCommand(state: GameState, commandStr: string): CommandRes
   if (cmd.includes('ask temple') || cmd.includes('temple')) return handleTemple(state);
   if (cmd.includes('ask guide') || cmd.includes('ask explorer') || cmd.includes('guide')) return handleGuide(state);
 
-  // ── Special room actions (item-gated or multi-path) ───────────────────────
-  if (roomId === 'entrance' && (cmd.includes('look around') || cmd.includes('look'))) return entranceLook(state);
-  if (roomId === 'guardians' && (cmd.includes('look around') || cmd.includes('look'))) return guardiansLook(state);
-  if (roomId === 'echoes' && (cmd.includes('look around') || cmd.includes('look'))) return echoesLook(state);
-  if (roomId === 'puzzle' && (cmd.includes('look around') || cmd.includes('look'))) return puzzleLook(state);
-  if (roomId === 'library' && (cmd.includes('look around') || cmd.includes('look'))) return libraryLook(state);
+  // ── Special room actions ──────────────────────────────────────────────────
+  if (roomId === 'entrance' && (cmd.includes('look around') || cmd.includes('look'))) return withNarrativeSideEffects(entranceLook(state), state, cmd);
+  if (roomId === 'guardians' && (cmd.includes('look around') || cmd.includes('look'))) return withNarrativeSideEffects(guardiansLook(state), state, cmd);
+  if (roomId === 'echoes' && (cmd.includes('look around') || cmd.includes('look'))) return withNarrativeSideEffects(echoesLook(state), state, cmd);
+  if (roomId === 'puzzle' && (cmd.includes('look around') || cmd.includes('look'))) return withNarrativeSideEffects(puzzleLook(state), state, cmd);
+  if (roomId === 'library' && (cmd.includes('look around') || cmd.includes('look'))) return withNarrativeSideEffects(libraryLook(state), state, cmd);
 
   if (roomId === 'flooded' && (cmd.includes('open sluice') || cmd.includes('drain') || cmd.includes('sluice') || cmd.includes('valve'))) {
-    return floodedOpenSluice(state);
+    return withNarrativeSideEffects(floodedOpenSluice(state), state, cmd);
   }
   if (roomId === 'library' && (cmd.includes('take tablet') || cmd.includes('take drainage') || cmd.includes('grab tablet'))) {
-    return libraryTakeTablet(state);
+    return withNarrativeSideEffects(libraryTakeTablet(state), state, cmd);
   }
   if (roomId === 'elements' && (cmd.includes('kindle') || cmd.includes('light shrine') || cmd.includes('earth') || cmd.includes('water shrine') || cmd.includes('fire shrine') || cmd.includes('air shrine') || cmd.includes('rotate basin') || cmd.includes('activate shrine'))) {
-    return elementsKindleSequence(state, cmd);
+    return withNarrativeSideEffects(elementsKindleSequence(state, cmd), state, cmd);
   }
   if (roomId === 'sanctum' && (cmd.includes('make offering') || cmd.includes('offer') || cmd.includes('place relic'))) {
-    return sanctumMakeOffering(state);
+    return withNarrativeSideEffects(sanctumMakeOffering(state), state, cmd);
   }
   if (roomId === 'final' && (cmd.includes('take relic') || cmd.includes('refuse') || cmd.includes('return relic') || cmd.includes('claim') || cmd.includes('accept') || cmd.includes('restore') || cmd.includes('put back'))) {
-    return finalEnding(state, cmd);
+    return withNarrativeSideEffects(finalEnding(state, cmd), state, cmd);
   }
 
-  // ── Puzzle engine — step-driven logic ────────────────────────────────────
+  // ── Puzzle engine ─────────────────────────────────────────────────────────
   const puzzleResult = tryAdvancePuzzle(state, cmd, roomId);
-  if (puzzleResult) return puzzleResult;
+  if (puzzleResult) return withNarrativeSideEffects(puzzleResult, state, cmd);
 
-  // ── Fallback ─────────────────────────────────────────────────────────────
-  return ok(`You pause in the ${getRoomTitle(roomId)}. The stonework absorbs the gesture without reply. Try a more specific action, or ask the guide for a hint.`);
+  // ── Fallback ──────────────────────────────────────────────────────────────
+  const fallback = ok(`You pause in the ${getRoomTitle(roomId)}. The stonework absorbs the gesture without reply. Try a more specific action, or ask the guide for a hint.`);
+  return withNarrativeSideEffects(fallback, state, cmd);
 }

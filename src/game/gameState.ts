@@ -4,6 +4,8 @@
  */
 import { GameState, RoomId, RoomFlags, Objective } from '../types';
 import { getItems } from './gameItems';
+import { buildInitialTempleMemory } from './templeMemoryEngine';
+import { buildInitialHintState } from './hintEngine';
 
 const ALL_ROOM_IDS: RoomId[] = [
   'entrance', 'guardians', 'echoes', 'puzzle',
@@ -160,13 +162,34 @@ export function buildInitialGameState(): GameState {
 
     puzzleProgress: {},
 
+    templeMemory: buildInitialTempleMemory(),
+
+    playerTraits: {
+      curiosity: 10,
+      wisdom: 10,
+      courage: 10,
+      greed: 0,
+      compassion: 10,
+      patience: 10,
+      recklessness: 0,
+      observation: 10,
+    },
+
+    hintState: buildInitialHintState(),
+
+    dialogueContext: {
+      templeWhistersLog: [],
+      guideResponseLog: [],
+      lastConversationTurn: 0,
+    },
+
     isCollapsing: false,
     gameCompleted: false,
   };
 }
 
 // ── Persistence ────────────────────────────────────────────────────────────────
-const STORAGE_KEY = 'RUDRA_GAME_STATE_V2';
+const STORAGE_KEY = 'RUDRA_GAME_STATE_V3';
 
 export function saveGameState(state: GameState): void {
   try {
@@ -188,7 +211,7 @@ export function loadGameState(): GameState | null {
 }
 
 export function clearGameState(): void {
-  localStorage.removeItem(STORAGE_KEY);
-  // also clear legacy key
+  localStorage.removeItem('RUDRA_GAME_STATE_V3');
+  localStorage.removeItem('RUDRA_GAME_STATE_V2');
   localStorage.removeItem('TEMPLE_OF_RUDRA_STATE');
 }
